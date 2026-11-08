@@ -5,6 +5,7 @@ use crate::halo2_proofs::halo2curves::bn256::{Fq, Fq12, Fq2};
 
 pub mod final_exp;
 pub mod pairing;
+pub mod proving_pairing;
 
 pub type FpChip<'range, F> = fp::FpChip<'range, F, Fq>;
 pub type FpPoint<F> = ProperCrtUint<F>;

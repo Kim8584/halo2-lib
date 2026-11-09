@@ -435,3 +435,196 @@ pub fn test_basis_conversion_poly_mul_matches_halo2curves() {
     println!("✅ Verified 20/20 trials: Garaga basis polynomial multiplication identically matches halo2curves::bn256::Fq12");
 }
 
+#[derive(Clone, Debug)]
+struct TwoPhaseConfig {
+    col_phase0: crate::halo2_proofs::plonk::Column<crate::halo2_proofs::plonk::Advice>,
+    col_phase1: crate::halo2_proofs::plonk::Column<crate::halo2_proofs::plonk::Advice>,
+    challenge: crate::halo2_proofs::plonk::Challenge,
+    q_phase1: crate::halo2_proofs::plonk::Selector,
+}
+
+#[derive(Default)]
+struct TwoPhaseTestCircuit {
+    phase0_val: crate::halo2_proofs::circuit::Value<crate::halo2_proofs::halo2curves::bn256::Fr>,
+}
+
+impl crate::halo2_proofs::plonk::Circuit<crate::halo2_proofs::halo2curves::bn256::Fr> for TwoPhaseTestCircuit {
+    type Config = TwoPhaseConfig;
+    type FloorPlanner = crate::halo2_proofs::circuit::SimpleFloorPlanner;
+    type Params = ();
+
+    fn without_witnesses(&self) -> Self {
+        Self::default()
+    }
+
+    fn configure(meta: &mut crate::halo2_proofs::plonk::ConstraintSystem<crate::halo2_proofs::halo2curves::bn256::Fr>) -> Self::Config {
+        let col_phase0 = meta.advice_column_in(crate::halo2_proofs::plonk::FirstPhase);
+        let col_phase1 = meta.advice_column_in(crate::halo2_proofs::plonk::SecondPhase);
+        meta.enable_equality(col_phase0);
+        meta.enable_equality(col_phase1);
+        let challenge = meta.challenge_usable_after(crate::halo2_proofs::plonk::FirstPhase);
+        let q_phase1 = meta.selector();
+
+        meta.create_gate("phase 1 check: advice_p1 == advice_p0 * challenge", |meta| {
+            let q = meta.query_selector(q_phase1);
+            let a0 = meta.query_advice(col_phase0, crate::halo2_proofs::poly::Rotation::cur());
+            let a1 = meta.query_advice(col_phase1, crate::halo2_proofs::poly::Rotation::cur());
+            let ch = meta.query_challenge(challenge);
+            vec![q * (a1 - a0 * ch)]
+        });
+
+        TwoPhaseConfig {
+            col_phase0,
+            col_phase1,
+            challenge,
+            q_phase1,
+        }
+    }
+
+    fn synthesize(
+        &self,
+        config: Self::Config,
+        mut layouter: impl crate::halo2_proofs::circuit::Layouter<crate::halo2_proofs::halo2curves::bn256::Fr>,
+    ) -> Result<(), crate::halo2_proofs::plonk::Error> {
+        layouter.assign_region(
+            || "two phase region",
+            |mut region| {
+                // Phase 0 assignment
+                region.assign_advice(config.col_phase0, 0, self.phase0_val);
+
+                // Advance to phase 1
+                region.next_phase();
+
+                // Obtain challenge usable after phase 0
+                let ch = region.get_challenge(config.challenge);
+
+                // Phase 1 assignment using the challenge
+                let p1_val = self.phase0_val * ch;
+                region.assign_advice(config.col_phase1, 0, p1_val);
+                config.q_phase1.enable(&mut region, 0)?;
+
+                Ok(())
+            },
+        )?;
+        Ok(())
+    }
+}
+
+#[test]
+pub fn test_minimal_two_phase_challenge_mock_prover() {
+    use crate::halo2_proofs::dev::MockProver;
+    use crate::halo2_proofs::circuit::Value;
+    use crate::halo2_proofs::halo2curves::bn256::Fr;
+
+    let k = 4;
+    let circuit = TwoPhaseTestCircuit {
+        phase0_val: Value::known(Fr::from(42u64)),
+    };
+    let prover = MockProver::run(k, &circuit, vec![]).expect("MockProver should init");
+    prover.assert_satisfied();
+    println!("✅ MockProver assert_satisfied passed for two-phase circuit with challenge!");
+}
+
+#[test]
+pub fn test_cheating_prover_two_phase_rejected() {
+    use crate::halo2_proofs::dev::MockProver;
+    use crate::halo2_proofs::circuit::Value;
+    use crate::halo2_proofs::halo2curves::bn256::Fr;
+
+    // A cheating circuit where the prover attempts to satisfy `a1 == a0 * ch`
+    // but in phase 1, having seen `ch`, tampers with the value or supplies an inconsistent a1.
+    struct CheatingTwoPhaseCircuit;
+
+    impl crate::halo2_proofs::plonk::Circuit<Fr> for CheatingTwoPhaseCircuit {
+        type Config = TwoPhaseConfig;
+        type FloorPlanner = crate::halo2_proofs::circuit::SimpleFloorPlanner;
+        type Params = ();
+
+        fn without_witnesses(&self) -> Self {
+            CheatingTwoPhaseCircuit
+        }
+
+        fn configure(meta: &mut crate::halo2_proofs::plonk::ConstraintSystem<Fr>) -> Self::Config {
+            TwoPhaseTestCircuit::configure(meta)
+        }
+
+        fn synthesize(
+            &self,
+            config: Self::Config,
+            mut layouter: impl crate::halo2_proofs::circuit::Layouter<Fr>,
+        ) -> Result<(), crate::halo2_proofs::plonk::Error> {
+            layouter.assign_region(
+                || "cheating two phase region",
+                |mut region| {
+                    // Phase 0: prover commits to a0 = 42
+                    let honest_a0 = Fr::from(42u64);
+                    region.assign_advice(config.col_phase0, 0, Value::known(honest_a0));
+
+                    region.next_phase();
+
+                    // Phase 1: prover observes challenge
+                    let ch = region.get_challenge(config.challenge);
+
+                    // Cheating prover attempts to forge by assigning a1 = 999 (tampered value)
+                    let forged_a1 = Value::known(Fr::from(999u64));
+                    region.assign_advice(config.col_phase1, 0, forged_a1);
+                    config.q_phase1.enable(&mut region, 0)?;
+
+                    Ok(())
+                },
+            )?;
+            Ok(())
+        }
+    }
+
+    let k = 4;
+    let prover = MockProver::run(k, &CheatingTwoPhaseCircuit, vec![]).expect("MockProver init");
+    let result = prover.verify();
+    assert!(result.is_err(), "Cheating prover MUST be rejected by MockProver!");
+    println!("✅ Confirmed: Cheating prover tampering after observing challenge was REJECTED by MockProver: {:?}", result.err());
+}
+
+
+#[test]
+pub fn test_measure_poseidon_absorption_cost() {
+    use halo2_base::halo2_proofs::halo2curves::bn256::Fr;
+    use halo2_base::poseidon::hasher::{
+        spec::OptimizedPoseidonSpec, PoseidonHasher,
+    };
+
+    base_test().k(14).run(|ctx, range| {
+        const T: usize = 3;
+        const RATE: usize = 2;
+        const R_F: usize = 8;
+        const R_P: usize = 57;
+
+        let spec = OptimizedPoseidonSpec::<Fr, T, RATE>::new::<R_F, R_P, 0>();
+        let mut hasher = PoseidonHasher::<Fr, T, RATE>::new(spec);
+        hasher.initialize_consts(ctx, &range.gate);
+
+        let init_cells = ctx.advice.len();
+
+        let num_scalars = 100;
+        let dummy_inputs: Vec<Fr> = (0..num_scalars).map(|i| Fr::from(i as u64)).collect();
+        let assigned_inputs = ctx.assign_witnesses(dummy_inputs);
+
+        let after_assign = ctx.advice.len();
+        let assign_cost = after_assign - init_cells;
+
+        let _hash_out = hasher.hash_fix_len_array(ctx, &range.gate, &assigned_inputs);
+
+        let after_hash = ctx.advice.len();
+        let hash_cost = after_hash - after_assign;
+
+        println!("================ Poseidon In-Circuit Absorption Cost ================");
+        println!("Number of Fr scalars absorbed: {num_scalars}");
+        println!("Witness assignment advice cells: {assign_cost}");
+        println!("Poseidon hashing advice cells: {hash_cost}");
+        println!("Advice cells per absorbed Fr scalar: {:.2}", hash_cost as f64 / num_scalars as f64);
+        println!("=====================================================================");
+    });
+}
+
+
+
+

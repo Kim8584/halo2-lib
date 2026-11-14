@@ -25,6 +25,7 @@ pub mod msm_sum_infinity;
 pub mod msm_sum_infinity_fixed_base;
 pub mod pairing;
 pub mod proving_pairing;
+pub mod experimental_challenge;
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct MSMCircuitParams {

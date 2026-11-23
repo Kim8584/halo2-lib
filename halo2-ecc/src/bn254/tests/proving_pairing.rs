@@ -563,7 +563,7 @@ pub fn test_cheating_prover_two_phase_rejected() {
                     region.next_phase();
 
                     // Phase 1: prover observes challenge
-                    let ch = region.get_challenge(config.challenge);
+                    let _ch = region.get_challenge(config.challenge);
 
                     // Cheating prover attempts to forge by assigning a1 = 999 (tampered value)
                     let forged_a1 = Value::known(Fr::from(999u64));

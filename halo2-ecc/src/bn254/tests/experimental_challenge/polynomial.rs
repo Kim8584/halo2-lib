@@ -1,5 +1,7 @@
+#![allow(dead_code)]
+#![allow(unused_imports)]
+#![allow(non_snake_case)]
 use halo2_base::halo2_proofs::halo2curves::bn256::Fq;
-use halo2_base::halo2_proofs::arithmetic::Field;
 
 /// Minimal polynomial modulus M(X) = X^12 - 18*X^6 + 82
 pub const M_COEFF_6: u64 = 18;

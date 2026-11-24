@@ -547,7 +547,7 @@ pub fn test_fixed_pairing_check_real_shplonk() {
     .expect("create_proof should succeed");
     let proof = transcript.finalize();
     let proof_time = start_proof.elapsed();
-    println!("⏱️  PROVER TIME (create_proof): {:?}", proof_time);
+    println!("PROVER TIME (create_proof): {:?}", proof_time);
     println!("  Proof generated, size: {} bytes", proof.len());
 
     println!("Verifying proof with real SHPLONK verifier...");
@@ -562,7 +562,7 @@ pub fn test_fixed_pairing_check_real_shplonk() {
         SingleStrategy<'_, Bn256>,
     >(params.verifier_params(), pk.get_vk(), strategy, &[&[]], &mut verifier_transcript);
     let verify_time = start_verify.elapsed();
-    println!("⏱️  VERIFIER TIME (verify_proof): {:?}", verify_time);
+    println!("VERIFIER TIME (verify_proof): {:?}", verify_time);
 
     assert!(verify_result.is_ok(), "Real SHPLONK verification failed: {:?}", verify_result.err());
     println!("Test Passed: Real SHPLONK create_proof + verify_proof succeeded on Fixed-G2 Pairing Check.\n");

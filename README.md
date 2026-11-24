@@ -303,3 +303,36 @@ cargo test --release --no-default-features --features "mimalloc" -- --nocapture 
 | 19  | 20         | 3                 | 1         | 32.6s               |
 | 20  | 11         | 2                 | 1         | 41.3s               |
 | 21  | 6          | 1                 | 1         | 51.9s               |
+
+### Hinted BN254 Pairing Verification (Garaga-style)
+
+We provide an optimized hinted pairing verification gadget for BN254 in `halo2-ecc` implementing polynomial evaluation checks over F_p[X] / (X^12 - 18*X^6 + 82) inspired by Garaga / Eagen-Novakovic.
+
+For fixed-G2 verification (Groth16 verifying keys, KZG multiproofs, BLS signatures), line functions are precomputed offline, eliminating in-circuit G2 operations and in-circuit final exponentiation while completely turning off lookup tables.
+
+#### Benchmark Summary Normalized at k = 19 (2-Pair BN254 Check)
+
+```text
++----------------------------------------------------------------------------------------------------------------+
+|                                    BN254 PAIRING BENCHMARK NORMALIZED AT k = 19                                |
++------------------------------+---------------------------+--------------------------+--------------------------+
+| Metric                       | Standard EC Pairing Chip  | Garaga-style Variable G2 | Garaga-style Fixed G2    |
++------------------------------+---------------------------+--------------------------+--------------------------+
+| Circuit Degree (k)           | k = 19 (524,288 rows)     | k = 19 (524,288 rows)    | k = 19 (or native k=15)  |
+| Advice Columns Needed        | 8 - 10 columns            | 2 - 3 columns            | 1 column (at k=19)       |
+| Phase 0 Advice Cells         | 4,114,308                 | ~1,000,000               | 11,020                   |
+| Phase 1 Advice Cells         | 0                         | ~100,000                 | 86,891                   |
+| Total Advice Cells           | 4,114,308                 | ~1,100,000               | 97,911                   |
+| Lookup Advice Cells          | 328,464                   | ~75,000                  | 0                        |
+| In-Circuit G2 Arithmetic     | Full in-circuit (396k)    | Full in-circuit (396k)   | Precomputed offline (0)  |
+| Final Exponentiation         | Full in-circuit (1.67M)   | Polynomial Check (Hinted)| Polynomial Check (Hinted)|
+| Prover Time (Dual-Core CPU)  | ~4.5 - 5.5 min            | ~1.2 - 1.8 min           | ~18s (or 36.21s at k=15) |
+| Prover Time (64-Core Server) | ~4.5 - 6.0 seconds        | ~1.5 - 2.0 seconds       | ~0.3 - 0.5 seconds       |
+| Verifier Time (verify_proof) | ~150 ms                   | ~40 ms                   | 19.62 ms                 |
+| Proof Size (KZG SHPLONK)     | ~24 KB                    | ~19 KB                   | 18,528 bytes             |
+| Cell Reduction vs Standard   | Baseline (1.0x)           | 3.74x                    | 42.02x                   |
++------------------------------+---------------------------+--------------------------+--------------------------+
+```
+
+For full architectural documentation, polynomial identity checks, and soundness bounds, see [halo2-ecc/README.md](halo2-ecc/README.md).
+
